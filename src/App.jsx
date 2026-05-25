@@ -2,6 +2,10 @@ import { useState } from "react";
 import Button from "./components/Button";
 import "./index.css";
 import StartGamePopup from "./components/StartGamePopup";
+import TossPopup from "./components/TossPopup";
+import PlayerSelectionPopup from "./components/PlayerSelectionPopup";
+import PlayerInfo from "./components/PlayerInfo";
+import BallByBallScoreboard from "./components/BallByBallScoreboard";
 import Popup from "./components/Popup";
 import { GAME_CONSTANTS } from "./constants";
 
@@ -16,7 +20,7 @@ function App() {
     team2: "",
     totalOvers: GAME_CONSTANTS.DEFAULT_OVERS,
     totalWickets: GAME_CONSTANTS.DEFAULT_WICKETS,
-    isStartGamePopupVisible: true,
+    isStartGameVisible: true,
     history: [],
     battingTeam: "",
     inning: 1,
@@ -70,7 +74,15 @@ function App() {
     currentRunRate: 0,
 
     // Extras popup
-    isExtrasPopupVisible: false,
+    isExtrasPopupVi sible: false,
+
+    // Player Management
+    showPlayerSelection: false,
+    players: {},
+    currentBatsmanIndex: 0,
+    currentNonStrikerIndex: 1,
+    currentBowlerIndex: 0,
+    lastOverBowlerIndex: -1,
   });
 
   // Calculate new overs and balls count
@@ -90,6 +102,136 @@ function App() {
     return [...currentHistory, stateWithoutHistory];
   };
 
+  const getTotalBalls = (overs, balls) => overs * GAME_CONSTANTS.BALLS_PER_OVER + balls;
+
+  const calculateRunRate = (runs, overs, balls) => {
+    const totalBalls = getTotalBalls(overs, balls);
+    return totalBalls > 0 ? Number(((runs / totalBalls) * GAME_CONSTANTS.BALLS_PER_OVER).toFixed(2)) : 0;
+  };
+
+  const calculateRequiredRunRate = (currentScore, targetScore, remainingBalls) => {
+    const remainingRuns = Math.max(0, targetScore - currentScore);
+    return remainingBalls > 0 ? Number(((remainingRuns / remainingBalls) * GAME_CONSTANTS.BALLS_PER_OVER).toFixed(2)) : 0;
+  };
+
+  const handleStartMatch = ({ team1, team2, totalOvers, totalWickets }) => {
+    setGameState(prev => ({
+      ...prev,
+      score: 0,
+      over: 0,
+      balls: 0,
+      wicket: totalWickets,
+      team1,
+      team2,
+      totalOvers,
+      totalWickets,
+      battingTeam: "",
+      inning: 1,
+      firstInningsScore: null,
+      isStartGameVisible: false,
+      isTossScreen: true,
+      isInningsTransition: false,
+      isInningsEndPopupVisible: false,
+      isResultPopupVisible: false,
+      resultMessage: "",
+      resultDetails: "",
+      gameMessage: "",
+      isGameOver: false,
+      batsmanRuns: 0,
+      lastDeliveryType: null,
+      extras: {
+        wides: 0,
+        noBalls: 0,
+        byes: 0,
+        legByes: 0,
+      },
+      tossWinner: "",
+      tossDecision: "",
+      currentBatsman: "Batsman 1",
+      nonStriker: "Batsman 2",
+      currentBowler: "Bowler 1",
+      boundaries: 0,
+      sixers: 0,
+      wides: 0,
+      noBalls: 0,
+      byes: 0,
+      legByes: 0,
+      dotBalls: 0,
+      isPowerplay: true,
+      fallOfWickets: [],
+      ballByBall: [],
+      requiredRunRate: 0,
+      currentRunRate: 0,
+      isExtrasPopupVisible: false,
+      history: [],
+    }));
+  };
+
+  const handleTossConfirm = ({ winner, decision }) => {
+    setGameState(prev => {
+      const battingTeam = decision === "bat" ? winner : winner === prev.team1 ? prev.team2 : prev.team1;
+      return {
+        ...prev,
+        tossWinner: winner,
+        tossDecision: decision,
+        battingTeam,
+        isTossScreen: false,
+        showPlayerSelection: true,
+        gameMessage: `${winner} won the toss and chose to ${decision}. ${battingTeam} will bat first.`,
+      };
+    });
+  };
+
+  const handlePlayersSet = (playersData) => {
+    setGameState(prev => ({
+      ...prev,
+      players: playersData,
+      showPlayerSelection: false,
+      currentBatsman: playersData[prev.battingTeam]?.batsmen[0] || "Batsman 1",
+      nonStriker: playersData[prev.battingTeam]?.batsmen[1] || "Batsman 2",
+      currentBowler: playersData[prev.battingTeam === prev.team1 ? prev.team2 : prev.team1]?.bowlers[0] || "Bowler 1",
+      currentBatsmanIndex: 0,
+      currentNonStrikerIndex: 1,
+      currentBowlerIndex: 0,
+      lastOverBowlerIndex: -1,
+    }));
+  };
+
+  const rotateStrike = (gameStateRef) => {
+    const battingTeam = gameStateRef.battingTeam;
+    const bowlingTeam = battingTeam === gameStateRef.team1 ? gameStateRef.team2 : gameStateRef.team1;
+    const batsmen = gameStateRef.players[battingTeam]?.batsmen || [];
+    
+    // Swap batsmen
+    const tempIndex = gameStateRef.currentBatsmanIndex;
+    gameStateRef.currentBatsmanIndex = gameStateRef.currentNonStrikerIndex;
+    gameStateRef.currentNonStrikerIndex = tempIndex;
+    gameStateRef.currentBatsman = batsmen[gameStateRef.currentBatsmanIndex] || "Batsman";
+    gameStateRef.nonStriker = batsmen[gameStateRef.currentNonStrikerIndex] || "Batsman";
+  };
+
+  const rotateBowler = (gameStateRef) => {
+    const bowlingTeam = gameStateRef.battingTeam === gameStateRef.team1 ? gameStateRef.team2 : gameStateRef.team1;
+    const bowlers = gameStateRef.players[bowlingTeam]?.bowlers || [];
+    
+    if (gameStateRef.lastOverBowlerIndex >= 0) {
+      // Rotate to next bowler
+      gameStateRef.currentBowlerIndex = (gameStateRef.currentBowlerIndex + 1) % bowlers.length;
+      gameStateRef.currentBowler = bowlers[gameStateRef.currentBowlerIndex] || "Bowler";
+    }
+    gameStateRef.lastOverBowlerIndex = gameStateRef.currentBowlerIndex;
+  };
+
+  const rotateOnWicket = (gameStateRef) => {
+    const battingTeam = gameStateRef.battingTeam;
+    const batsmen = gameStateRef.players[battingTeam]?.batsmen || [];
+    
+    // Bring in new batsman
+    gameStateRef.currentBatsmanIndex = Math.min(gameStateRef.currentBatsmanIndex + 2, batsmen.length - 1);
+    gameStateRef.currentBatsman = batsmen[gameStateRef.currentBatsmanIndex] || "Batsman";
+    gameStateRef.nonStriker = batsmen[gameStateRef.currentNonStrikerIndex] || "Batsman";
+  };
+
   const updateGameEnd = (newState) => {
     if (newState.inning === 1) {
       if (newState.wicket <= 0) {
@@ -97,7 +239,7 @@ function App() {
         newState.isInningsTransition = true;
         newState.isInningsEndPopupVisible = true;
         newState.gameMessage = `First innings complete: ${newState.battingTeam} all out at ${newState.score}.`;
-        newState.isGameOver = true;
+        newState.isGameOver = false;
         return;
       }
       if (newState.over >= newState.totalOvers) {
@@ -105,7 +247,7 @@ function App() {
         newState.isInningsTransition = true;
         newState.isInningsEndPopupVisible = true;
         newState.gameMessage = `First innings complete: ${newState.battingTeam} ${newState.score}/${newState.totalWickets - newState.wicket} in ${newState.totalOvers}.`;
-        newState.isGameOver = true;
+        newState.isGameOver = false;
         return;
       }
       newState.gameMessage = "";
@@ -127,10 +269,15 @@ function App() {
 
       // Check for other end conditions
       if (newState.wicket <= 0) {
-        const fieldingTeam = newState.battingTeam === newState.team1 ? newState.team2 : newState.team1;
-        const runMargin = newState.firstInningsScore - newState.score;
-        newState.resultMessage = `🏆 ${fieldingTeam} Wins!`;
-        newState.resultDetails = `${fieldingTeam} won by ${runMargin} run${runMargin !== 1 ? 's' : ''} (${newState.battingTeam} all out)`;
+        if (newState.score === newState.firstInningsScore) {
+          newState.resultMessage = `🤝 Match Tied!`;
+          newState.resultDetails = `Both teams scored ${newState.score}.`;
+        } else {
+          const fieldingTeam = newState.battingTeam === newState.team1 ? newState.team2 : newState.team1;
+          const runMargin = newState.firstInningsScore - newState.score;
+          newState.resultMessage = `🏆 ${fieldingTeam} Wins!`;
+          newState.resultDetails = `${fieldingTeam} won by ${runMargin} run${runMargin !== 1 ? 's' : ''} (${newState.battingTeam} all out)`;
+        }
         newState.isResultPopupVisible = true;
         newState.isGameOver = true;
         return;
@@ -141,6 +288,9 @@ function App() {
           const runMargin = newState.score - newState.firstInningsScore;
           newState.resultMessage = `🏆 ${newState.battingTeam} Wins!`;
           newState.resultDetails = `${newState.battingTeam} won by ${runMargin} run${runMargin !== 1 ? 's' : ''} with ${newState.wicket} wicket${newState.wicket !== 1 ? 's' : ''} left`;
+        } else if (newState.score === newState.firstInningsScore) {
+          newState.resultMessage = `🤝 Match Tied!`;
+          newState.resultDetails = `Both teams scored ${newState.score}.`;
         } else {
           const fieldingTeam = newState.battingTeam === newState.team1 ? newState.team2 : newState.team1;
           const runMargin = newState.firstInningsScore - newState.score;
@@ -224,6 +374,12 @@ function App() {
 
       const { overs: newOvers, balls: newBalls } = calculateOversAndBalls(prev.balls, prev.over, ballsToAdd);
       const isPowerplay = newOvers < GAME_CONSTANTS.POWERPLAY_OVERS;
+      const updatedScore = prev.score + totalRuns;
+      const currentRunRate = calculateRunRate(updatedScore, newOvers, newBalls);
+      const totalBallsLeft = getTotalBalls(prev.totalOvers, 0) - getTotalBalls(newOvers, newBalls);
+      const requiredRunRate = prev.inning === 2 && prev.firstInningsScore !== null
+        ? calculateRequiredRunRate(updatedScore, prev.firstInningsScore + 1, totalBallsLeft)
+        : 0;
 
       // Track statistics
       let newBoundaries = prev.boundaries;
@@ -244,7 +400,7 @@ function App() {
       const newState = {
         ...prev,
         history: saveToHistory(prev),
-        score: prev.score + totalRuns,
+        score: updatedScore,
         balls: newBalls,
         over: newOvers,
         boundaries: newBoundaries,
@@ -254,6 +410,15 @@ function App() {
         lastDeliveryType: deliveryType,
         extras: newExtras,
         isPowerplay,
+        currentRunRate,
+        requiredRunRate,
+        currentBatsman: prev.currentBatsman,
+        nonStriker: prev.nonStriker,
+        currentBowler: prev.currentBowler,
+        currentBatsmanIndex: prev.currentBatsmanIndex,
+        currentNonStrikerIndex: prev.currentNonStrikerIndex,
+        currentBowlerIndex: prev.currentBowlerIndex,
+        lastOverBowlerIndex: prev.lastOverBowlerIndex,
         ballByBall: [
           ...prev.ballByBall,
           {
@@ -268,6 +433,12 @@ function App() {
           },
         ],
       };
+
+      // Rotate strike if over is complete
+      if (newBalls === 0 && ballsToAdd > 0) {
+        rotateStrike(newState);
+        rotateBowler(newState);
+      }
 
       updateGameEnd(newState);
       return newState;
@@ -297,7 +468,8 @@ function App() {
         };
       }
 
-      const { overs: newOvers, balls: newBalls } = calculateOversAndBalls(prev.balls, prev.over, 1);
+      const ballsToAdd = prev.lastDeliveryType === "wide" || prev.lastDeliveryType === "noball" ? 0 : 1;
+      const { overs: newOvers, balls: newBalls } = calculateOversAndBalls(prev.balls, prev.over, ballsToAdd);
       const newFallOfWickets = [
         ...prev.fallOfWickets,
         {
@@ -311,6 +483,13 @@ function App() {
         },
       ];
 
+      const updatedScore = prev.score;
+      const currentRunRate = calculateRunRate(updatedScore, newOvers, newBalls);
+      const totalBallsLeft = getTotalBalls(prev.totalOvers, 0) - getTotalBalls(newOvers, newBalls);
+      const requiredRunRate = prev.inning === 2 && prev.firstInningsScore !== null
+        ? calculateRequiredRunRate(updatedScore, prev.firstInningsScore + 1, totalBallsLeft)
+        : 0;
+
       const newState = {
         ...prev,
         history: saveToHistory(prev),
@@ -318,6 +497,15 @@ function App() {
         balls: newBalls,
         over: newOvers,
         fallOfWickets: newFallOfWickets,
+        currentRunRate,
+        requiredRunRate,
+        currentBatsman: prev.currentBatsman,
+        nonStriker: prev.nonStriker,
+        currentBowler: prev.currentBowler,
+        currentBatsmanIndex: prev.currentBatsmanIndex,
+        currentNonStrikerIndex: prev.currentNonStrikerIndex,
+        currentBowlerIndex: prev.currentBowlerIndex,
+        lastOverBowlerIndex: prev.lastOverBowlerIndex,
         ballByBall: [
           ...prev.ballByBall,
           {
@@ -333,6 +521,11 @@ function App() {
         ],
         gameMessage: `WICKET (${type.toUpperCase()})! ${prev.currentBatsman} dismissed!`
       };
+
+      // Rotate in new batsman
+      if (newState.wicket > 0) {
+        rotateOnWicket(newState);
+      }
 
       updateGameEnd(newState);
       return newState;
@@ -413,7 +606,9 @@ function App() {
   const startSecondInnings = () => {
     setGameState(prev => {
       const requiredRuns = prev.firstInningsScore + 1;
-      const requiredRunRate = (requiredRuns / prev.totalOvers).toFixed(2);
+      const requiredRunRate = calculateRequiredRunRate(0, requiredRuns, getTotalBalls(prev.totalOvers, 0));
+      const battingTeam = prev.battingTeam === prev.team1 ? prev.team2 : prev.team1;
+      const bowlingTeam = prev.battingTeam;
 
       return {
         ...prev,
@@ -425,8 +620,8 @@ function App() {
         isGameOver: false,
         isInningsTransition: false,
         isInningsEndPopupVisible: false,
-        gameMessage: `Second innings start: ${prev.battingTeam === prev.team1 ? prev.team2 : prev.team1} needs ${requiredRuns} runs`,
-        battingTeam: prev.battingTeam === prev.team1 ? prev.team2 : prev.team1,
+        gameMessage: `Second innings start: ${battingTeam} needs ${requiredRuns} runs`,
+        battingTeam,
         history: [],
         boundaries: 0,
         sixers: 0,
@@ -448,9 +643,13 @@ function App() {
         ballByBall: [],
         requiredRunRate,
         currentRunRate: 0,
-        currentBatsman: "Batsman 1",
-        nonStriker: "Batsman 2",
-        currentBowler: "Bowler 1",
+        currentBatsman: prev.players[battingTeam]?.batsmen[0] || "Batsman 1",
+        nonStriker: prev.players[battingTeam]?.batsmen[1] || "Batsman 2",
+        currentBowler: prev.players[bowlingTeam]?.bowlers[0] || "Bowler 1",
+        currentBatsmanIndex: 0,
+        currentNonStrikerIndex: 1,
+        currentBowlerIndex: 0,
+        lastOverBowlerIndex: -1,
       };
     });
   };
@@ -596,12 +795,12 @@ function App() {
     }
   };
 
-  const isControlsDisabled = gameState.isGameOver || gameState.isStartGameVisible || gameState.isInningsTransition;
+  const isControlsDisabled = gameState.isGameOver || gameState.isStartGameVisible || gameState.isInningsTransition || gameState.isTossScreen || gameState.showPlayerSelection;
 
   return (
     <>
       <div
-        className="flex justify-center items-center min-h-screen overflow-hidden text-white bg-gradient-to-br from-green-800 via-green-600 to-green-900 relative"
+        className="flex justify-center items-center min-h-screen overflow-auto text-white bg-gradient-to-br from-green-800 via-green-600 to-green-900 relative"
         style={{
           backgroundImage: `
             linear-gradient(180deg, rgba(20,83,11,0.9) 0%, rgba(34,197,94,0.7) 50%, rgba(20,83,11,0.9) 100%),
@@ -624,7 +823,7 @@ function App() {
           </svg>
         </div>
 
-        <div className="flex flex-col h-screen w-full max-w-6xl gap-8 p-4 relative z-10">
+        <div className="flex flex-col min-h-screen w-full max-w-6xl gap-8 p-4 relative z-10">
           {/* Scoreboard */}
           <div className="flex-shrink-0 lg:w-full w-full">
             <div className="lg:w-[70%] mx-auto pt-6 flex flex-col bg-gradient-to-br from-black/80 to-black/60 rounded-3xl ss-font justify-between backdrop-blur-md border-2 border-yellow-400/30 shadow-2xl">
@@ -652,112 +851,71 @@ function App() {
             </div>
           </div>
 
-          {/* Advanced AI Match Analysis Section */}
-          <div className="flex-shrink-0 lg:w-[70%] mx-auto">
-            <div className="bg-gradient-to-br from-purple-900/80 to-purple-800/60 rounded-3xl backdrop-blur-md border-2 border-purple-400/30 shadow-2xl p-6">
-              <h3 className="text-xl font-bold text-purple-300 mb-4 text-center uppercase tracking-wider">🤖 AI Match Analysis</h3>
+          {/* Player Information */}
+          {gameState.battingTeam && !gameState.isStartGameVisible && !gameState.isTossScreen && !gameState.showPlayerSelection && (
+            <PlayerInfo
+              currentBatsman={gameState.currentBatsman}
+              nonStriker={gameState.nonStriker}
+              currentBowler={gameState.currentBowler}
+              battingTeam={gameState.battingTeam}
+              bowlingTeam={gameState.battingTeam === gameState.team1 ? gameState.team2 : gameState.team1}
+            />
+          )}
 
-              {/* Team Status Header */}
-              <div className="mb-4 text-center">
-                <div className="text-purple-200 text-sm mb-1">
-                  {gameState.inning === 1 ? "First Innings" : "Second Innings"} - {getCurrentBattingTeam()} Batting
-                </div>
-                <div className="text-purple-300 text-lg font-bold">
-                  {analyzeMatchSituation()}
-                </div>
-              </div>
+          {/* AI analysis and scoring shots side by side */}
+          <div className="flex flex-col lg:flex-row lg:items-start gap-6">
+            <div className="lg:w-[38%]">
+              <div className="bg-gradient-to-br from-purple-900/80 to-purple-800/60 rounded-3xl backdrop-blur-md border-2 border-purple-400/30 shadow-2xl p-6 h-full">
+                <h3 className="text-xl font-bold text-purple-300 mb-4 text-center uppercase tracking-wider">🤖 AI Match Analysis</h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                {/* Team Performance */}
-                <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
-                  <div className="text-purple-200 text-sm mb-1">Team Performance</div>
-                  <div className="text-2xl font-bold text-white">{analyzeTeamPerformance().performance}</div>
-                  <div className="text-sm text-purple-300">{analyzeTeamPerformance().score}% Rating</div>
-                </div>
-
-                {/* Win Probability */}
-                <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
+                <div className="mb-4 text-center">
                   <div className="text-purple-200 text-sm mb-1">
-                    {gameState.inning === 1 ? "Projected Score" : "Win Probability"}
+                    {gameState.inning === 1 ? "First Innings" : "Second Innings"} - {getCurrentBattingTeam()} Batting
                   </div>
-                  <div className="text-3xl font-bold text-green-400">
-                    {gameState.inning === 1 ? `${Math.round(gameState.score * (gameState.totalOvers / Math.max(gameState.over, 1)))}*` : `${calculateWinProbability()}%`}
+                  <div className="text-purple-300 text-lg font-bold">
+                    {analyzeMatchSituation()}
                   </div>
                 </div>
 
-                {/* Run Rate Analysis */}
-                {gameState.inning === 1 ? (
+                <div className="grid grid-cols-1 gap-4 mb-4">
                   <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
-                    <div className="text-purple-200 text-sm mb-1">Current Run Rate</div>
-                    <div className={`text-2xl font-bold ${getRunRateAnalysis().color}`}>
-                      {getRunRateAnalysis().rate}
-                    </div>
-                    <div className="text-sm text-purple-300">{getRunRateAnalysis().status}</div>
+                    <div className="text-purple-200 text-xs uppercase tracking-[0.18em] mb-2">Performance</div>
+                    <div className="text-xl font-bold text-white">{analyzeTeamPerformance().performance}</div>
+                    <div className="text-sm text-purple-300">{analyzeTeamPerformance().score}%</div>
                   </div>
-                ) : (
+
                   <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
-                    <div className="text-purple-200 text-sm mb-1">Run Rates</div>
+                    <div className="text-purple-200 text-xs uppercase tracking-[0.18em] mb-2">
+                      {gameState.inning === 1 ? "Projected" : "Win Chance"}
+                    </div>
+                    <div className="text-2xl font-bold text-green-400">
+                      {gameState.inning === 1 ? `${Math.round(gameState.score * (gameState.totalOvers / Math.max(gameState.over, 1)))}*` : `${calculateWinProbability()}%`}
+                    </div>
+                  </div>
+
+                  <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
+                    <div className="text-purple-200 text-xs uppercase tracking-[0.18em] mb-2">Advice</div>
+                    <div className="text-white text-sm leading-snug">
+                      {getStrategicAdvice()}
+                    </div>
+                  </div>
+                </div>
+
+                {gameState.inning === 2 && gameState.firstInningsScore && (
+                  <div className="bg-purple-800/30 rounded-2xl p-4 border border-purple-400/10">
+                    <div className="text-purple-200 text-xs uppercase tracking-[0.18em] mb-2">Target</div>
                     <div className="text-sm text-purple-200">
-                      Current: <span className="text-yellow-300 font-bold">{getRunRateAnalysis().current.rate}</span>
+                      Target: <span className="text-yellow-300 font-bold">{gameState.firstInningsScore + 1}</span>
                     </div>
                     <div className="text-sm text-purple-200">
-                      Required: <span className="text-red-300 font-bold">{getRunRateAnalysis().required.rate}</span>
+                      Need: <span className="text-red-300 font-bold">{Math.max(0, gameState.firstInningsScore + 1 - gameState.score)}</span>
                     </div>
                   </div>
                 )}
-
-                {/* Key Stats */}
-                <div className="bg-purple-800/50 rounded-lg p-4 border border-purple-400/20">
-                  <div className="text-purple-200 text-sm mb-1">Key Metrics</div>
-                  <div className="text-sm text-purple-200">
-                    Wickets Left: <span className="text-red-300 font-bold">{gameState.wicket}</span>
-                  </div>
-                  <div className="text-sm text-purple-200">
-                    Overs Left: <span className="text-blue-300 font-bold">{gameState.totalOvers - gameState.over}.{6 - gameState.balls}</span>
-                  </div>
-                </div>
               </div>
-
-              {/* Strategic Advice */}
-              <div className="bg-purple-800/30 rounded-lg p-4 border border-purple-400/10">
-                <div className="text-purple-200 text-sm mb-2">💡 Strategic Advice</div>
-                <div className="text-purple-100 text-sm font-medium">
-                  {getStrategicAdvice()}
-                </div>
-              </div>
-
-              {/* Second Innings Specific Info */}
-              {gameState.inning === 2 && gameState.firstInningsScore && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-purple-800/30 rounded-lg p-4 border border-purple-400/10">
-                    <div className="text-purple-200 text-sm mb-1">Target Information</div>
-                    <div className="text-sm text-purple-200">
-                      Target: <span className="text-yellow-300 font-bold text-lg">{gameState.firstInningsScore + 1}</span>
-                    </div>
-                    <div className="text-sm text-purple-200">
-                      Runs Needed: <span className="text-red-300 font-bold text-lg">{Math.max(0, gameState.firstInningsScore + 1 - gameState.score)}</span>
-                    </div>
-                  </div>
-                  <div className="bg-purple-800/30 rounded-lg p-4 border border-purple-400/10">
-                    <div className="text-purple-200 text-sm mb-1">Match Progress</div>
-                    <div className="text-sm text-purple-200">
-                      Progress: <span className="text-blue-300 font-bold">{((gameState.score / (gameState.firstInningsScore + 1)) * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="text-sm text-purple-200">
-                      Phase: <span className="text-green-300 font-bold">
-                        {gameState.over <= 6 ? "Powerplay" : gameState.over <= 15 ? "Middle Overs" : "Death Overs"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
 
-          {/* Button Grid - Organized by Category */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="space-y-6">
-              {/* Runs Section */}
+            <div className="lg:w-[62%] flex flex-col gap-6">
               <div className="bg-black/50 backdrop-blur-md rounded-2xl p-6 border border-blue-400/30">
                 <h3 className="text-lg font-bold text-blue-300 mb-4 uppercase tracking-wider">Scoring Shots</h3>
                 <div className="grid grid-cols-4 md:grid-cols-7 gap-2 lg:gap-3">
@@ -806,7 +964,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Extras Section - Heading Only */}
               <button
                 onClick={() => setGameState(prev => ({ ...prev, isExtrasPopupVisible: true }))}
                 className="w-full bg-black/50 backdrop-blur-md rounded-2xl p-6 border border-purple-400/30 hover:border-purple-400/60 hover:bg-black/60 transition-all"
@@ -814,7 +971,6 @@ function App() {
                 <h3 className="text-lg font-bold text-purple-300 uppercase tracking-wider">⚪ Other Runs & Extras</h3>
               </button>
 
-              {/* Wickets & Controls Section */}
               <div className="bg-black/50 backdrop-blur-md rounded-2xl p-6 border border-red-400/30">
                 <h3 className="text-lg font-bold text-red-300 mb-4 uppercase tracking-wider">Match Actions</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -840,6 +996,11 @@ function App() {
               </div>
             </div>
           </div>
+
+          {/* Ball-by-Ball Scoreboard */}
+          {gameState.ballByBall && gameState.ballByBall.length > 0 && (
+            <BallByBallScoreboard ballByBall={gameState.ballByBall} fallOfWickets={gameState.fallOfWickets} />
+          )}
         </div>
       </div>
 
@@ -852,16 +1013,16 @@ function App() {
       `}</style>
       {gameState.isStartGameVisible && (
         <StartGamePopup
-          setTeam1={(value) => setGameState(prev => ({ ...prev, team1: value }))}
-          setTeam2={(value) => setGameState(prev => ({ ...prev, team2: value }))}
-          setTotalOvers={(value) => setGameState(prev => ({ ...prev, totalOvers: value }))}
-          setTotalWickets={(value) => setGameState(prev => ({ ...prev, totalWickets: value }))}
-          setStartGameVisible={(value) => setGameState(prev => ({ ...prev, isStartGameVisible: value }))}
-          setWicket={(value) => setGameState(prev => ({ ...prev, wicket: value }))}
-          setScore={(value) => setGameState(prev => ({ ...prev, score: value }))}
-          setOver={(value) => setGameState(prev => ({ ...prev, over: value }))}
-          setBalls={(value) => setGameState(prev => ({ ...prev, balls: value }))}
-          setBattingTeam={(value) => setGameState(prev => ({ ...prev, battingTeam: value }))}
+          onStartGame={handleStartMatch}
+          onClose={() => setGameState(prev => ({ ...prev, isStartGameVisible: false }))}
+        />
+      )}
+      {gameState.isTossScreen && (
+        <TossPopup
+          team1={gameState.team1}
+          team2={gameState.team2}
+          onTossConfirm={handleTossConfirm}
+          onCancel={() => setGameState(prev => ({ ...prev, isTossScreen: false, isStartGameVisible: true }))}
         />
       )}
 
@@ -918,6 +1079,15 @@ function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {gameState.showPlayerSelection && (
+        <PlayerSelectionPopup
+          team1={gameState.team1}
+          team2={gameState.team2}
+          onPlayersSet={handlePlayersSet}
+          onCancel={() => setGameState(prev => ({ ...prev, showPlayerSelection: false, isTossScreen: true }))}
+        />
       )}
 
       {gameState.isExtrasPopupVisible && (
